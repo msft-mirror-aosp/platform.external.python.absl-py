@@ -14,10 +14,6 @@
 
 """Unittests for helpers module."""
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import sys
 
 from absl.flags import _helpers
@@ -152,21 +148,6 @@ class GetCallingModuleTest(absltest.TestCase):
                        'absl.flags.tests.module_foo')
     finally:
       sys.modules = orig_sys_modules
-
-
-class IsBytesOrString(absltest.TestCase):
-
-  def test_bytes(self):
-    self.assertTrue(_helpers.is_bytes_or_string(b'bytes'))
-
-  def test_str(self):
-    self.assertTrue(_helpers.is_bytes_or_string('str'))
-
-  def test_unicode(self):
-    self.assertTrue(_helpers.is_bytes_or_string(u'unicode'))
-
-  def test_list(self):
-    self.assertFalse(_helpers.is_bytes_or_string(['str']))
 
 
 if __name__ == '__main__':
