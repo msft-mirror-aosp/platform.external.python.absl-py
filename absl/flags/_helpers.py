@@ -14,10 +14,6 @@
 
 """Internal helper functions for Abseil Python flags library."""
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import collections
 import os
 import re
@@ -36,8 +32,9 @@ except ImportError:
 
 
 _DEFAULT_HELP_WIDTH = 80  # Default width of help output.
-_MIN_HELP_WIDTH = 40  # Minimal "sane" width of help output. We assume that any
-                      # value below 40 is unreasonable.
+# Minimal "sane" width of help output. We assume that any value below 40 is
+# unreasonable.
+_MIN_HELP_WIDTH = 40
 
 # Define the allowed error rate in an input string to get suggestions.
 #
@@ -129,32 +126,6 @@ def get_calling_module():
   return get_calling_module_object_and_name().module_name
 
 
-def str_or_unicode(value):
-  """Converts a value to a python string.
-
-  Behavior of this function is intentionally different in Python2/3.
-
-  In Python2, the given value is attempted to convert to a str (byte string).
-  If it contains non-ASCII characters, it is converted to a unicode instead.
-
-  In Python3, the given value is always converted to a str (unicode string).
-
-  This behavior reflects the (bad) practice in Python2 to try to represent
-  a string as str as long as it contains ASCII characters only.
-
-  Args:
-    value: An object to be converted to a string.
-
-  Returns:
-    A string representation of the given value. See the description above
-    for its type.
-  """
-  try:
-    return str(value)
-  except UnicodeEncodeError:
-    return unicode(value)  # Python3 should never come here
-
-
 def create_xml_dom_element(doc, name, value):
   """Returns an XML DOM element with name and text value.
 
@@ -168,7 +139,7 @@ def create_xml_dom_element(doc, name, value):
   Returns:
     An instance of minidom.Element.
   """
-  s = str_or_unicode(value)
+  s = str(value)
   if isinstance(value, bool):
     # Display boolean values as the C++ flag library does: no caps.
     s = s.lower()
@@ -321,14 +292,18 @@ def flag_dict_to_args(flag_map, multi_flags=None):
   Args:
     flag_map: dict, a mapping where the keys are flag names (strings).
         values are treated according to their type:
-        * If value is None, then only the name is emitted.
-        * If value is True, then only the name is emitted.
-        * If value is False, then only the name prepended with 'no' is emitted.
-        * If value is a string then --name=value is emitted.
-        * If value is a collection, this will emit --name=value1,value2,value3,
-          unless the flag name is in multi_flags, in which case this will emit
-          --name=value1 --name=value2 --name=value3.
+
+        * If value is ``None``, then only the name is emitted.
+        * If value is ``True``, then only the name is emitted.
+        * If value is ``False``, then only the name prepended with 'no' is
+          emitted.
+        * If value is a string then ``--name=value`` is emitted.
+        * If value is a collection, this will emit
+          ``--name=value1,value2,value3``, unless the flag name is in
+          ``multi_flags``, in which case this will emit
+          ``--name=value1 --name=value2 --name=value3``.
         * Everything else is converted to string an passed as such.
+
     multi_flags: set, names (strings) of flags that should be treated as
         multi-flags.
   Yields:
@@ -424,10 +399,3 @@ def doc_to_help(doc):
   doc = re.sub(r'(?<=\S)\n(?=\S)', ' ', doc, flags=re.M)
 
   return doc
-
-
-def is_bytes_or_string(maybe_string):
-  if str is bytes:
-    return isinstance(maybe_string, basestring)
-  else:
-    return isinstance(maybe_string, (str, bytes))
