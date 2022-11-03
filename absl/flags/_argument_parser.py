@@ -93,9 +93,9 @@ class _ArgumentParserCache(type):
 class ArgumentParser(metaclass=_ArgumentParserCache):
   """Base class used to parse and convert arguments.
 
-  The parse() method checks to make sure that the string argument is a
+  The :meth:`parse` method checks to make sure that the string argument is a
   legal value and convert it to a native type.  If the value cannot be
-  converted, it should throw a 'ValueError' exception with a human
+  converted, it should throw a ``ValueError`` exception with a human
   readable explanation of why the value is illegal.
 
   Subclasses should also define a syntactic_help string which may be
@@ -147,7 +147,7 @@ class ArgumentSerializer(object):
 
   def serialize(self, value):
     """Returns a serialized string of the value."""
-    return _helpers.str_or_unicode(value)
+    return str(value)
 
 
 class NumericParser(ArgumentParser):
@@ -454,11 +454,11 @@ class ListSerializer(ArgumentSerializer):
 
   def serialize(self, value):
     """See base class."""
-    return self.list_sep.join([_helpers.str_or_unicode(x) for x in value])
+    return self.list_sep.join([str(x) for x in value])
 
 
 class EnumClassListSerializer(ListSerializer):
-  """A serializer for MultiEnumClass flags.
+  """A serializer for :class:`MultiEnumClass` flags.
 
   This serializer simply joins the output of `EnumClassSerializer` using a
   provided separator.
@@ -498,7 +498,7 @@ class CsvListSerializer(ArgumentSerializer):
 
     # We need the returned value to be pure ascii or Unicodes so that
     # when the xml help is generated they are usefully encodable.
-    return _helpers.str_or_unicode(serialized_value)
+    return str(serialized_value)
 
 
 class EnumClassSerializer(ArgumentSerializer):
@@ -514,16 +514,16 @@ class EnumClassSerializer(ArgumentSerializer):
 
   def serialize(self, value):
     """Returns a serialized string of the Enum class value."""
-    as_string = _helpers.str_or_unicode(value.name)
+    as_string = str(value.name)
     return as_string.lower() if self._lowercase else as_string
 
 
 class BaseListParser(ArgumentParser):
   """Base class for a parser of lists of strings.
 
-  To extend, inherit from this class; from the subclass __init__, call
+  To extend, inherit from this class; from the subclass ``__init__``, call::
 
-      BaseListParser.__init__(self, token, name)
+      super().__init__(token, name)
 
   where token is a character used to tokenize, and name is a description
   of the separator.
