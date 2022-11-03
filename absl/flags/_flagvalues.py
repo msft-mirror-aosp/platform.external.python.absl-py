@@ -37,36 +37,41 @@ _T = TypeVar('_T')
 
 
 class FlagValues:
-  """Registry of 'Flag' objects.
+  """Registry of :class:`~absl.flags.Flag` objects.
 
-  A 'FlagValues' can then scan command line arguments, passing flag
+  A :class:`FlagValues` can then scan command line arguments, passing flag
   arguments through to the 'Flag' objects that it owns.  It also
   provides easy access to the flag values.  Typically only one
-  'FlagValues' object is needed by an application: flags.FLAGS
+  :class:`FlagValues` object is needed by an application:
+  :const:`FLAGS`.
 
   This class is heavily overloaded:
 
-  'Flag' objects are registered via __setitem__:
+  :class:`Flag` objects are registered via ``__setitem__``::
+
        FLAGS['longname'] = x   # register a new flag
 
-  The .value attribute of the registered 'Flag' objects can be accessed
-  as attributes of this 'FlagValues' object, through __getattr__.  Both
-  the long and short name of the original 'Flag' objects can be used to
-  access its value:
-       FLAGS.longname          # parsed flag value
-       FLAGS.x                 # parsed flag value (short name)
+  The ``.value`` attribute of the registered :class:`~absl.flags.Flag` objects
+  can be accessed as attributes of this :class:`FlagValues` object, through
+  ``__getattr__``.  Both the long and short name of the original
+  :class:`~absl.flags.Flag` objects can be used to access its value::
 
-  Command line arguments are scanned and passed to the registered 'Flag'
-  objects through the __call__ method.  Unparsed arguments, including
-  argv[0] (e.g. the program name) are returned.
+       FLAGS.longname  # parsed flag value
+       FLAGS.x  # parsed flag value (short name)
+
+  Command line arguments are scanned and passed to the registered
+  :class:`~absl.flags.Flag` objects through the ``__call__`` method.  Unparsed
+  arguments, including ``argv[0]`` (e.g. the program name) are returned::
+
        argv = FLAGS(sys.argv)  # scan command line arguments
 
-  The original registered Flag objects can be retrieved through the use
-  of the dictionary-like operator, __getitem__:
+  The original registered :class:`~absl.flags.Flag` objects can be retrieved
+  through the use of the dictionary-like operator, ``__getitem__``::
+
        x = FLAGS['longname']   # access the registered Flag object
 
-  The str() operator of a 'FlagValues' object provides help for all of
-  the registered 'Flag' objects.
+  The ``str()`` operator of a :class:`absl.flags.FlagValues` object provides
+  help for all of the registered :class:`~absl.flags.Flag` objects.
   """
 
   # A note on collections.abc.Mapping:
@@ -407,11 +412,7 @@ class FlagValues:
     fl = self._flags()
     if not isinstance(flag, _flag.Flag):
       raise _exceptions.IllegalFlagValueError(flag)
-    if str is bytes and isinstance(name, unicode):
-      # When using Python 2 with unicode_literals, allow it but encode it
-      # into the bytes type we require.
-      name = name.encode('utf-8')
-    if not isinstance(name, type('')):
+    if not isinstance(name, str):
       raise _exceptions.Error('Flag name must be a string')
     if not name:
       raise _exceptions.Error('Flag name cannot be empty')
@@ -627,7 +628,7 @@ class FlagValues:
        TypeError: Raised on passing wrong type of arguments.
        ValueError: Raised on flag value parsing error.
     """
-    if _helpers.is_bytes_or_string(argv):
+    if isinstance(argv, (str, bytes)):
       raise TypeError(
           'argv should be a tuple/list of strings, not bytes or string.')
     if not argv:
@@ -821,7 +822,7 @@ class FlagValues:
     """Explicitly marks flags as parsed.
 
     Use this when the caller knows that this FlagValues has been parsed as if
-    a __call__() invocation has happened.  This is only a public method for
+    a ``__call__()`` invocation has happened.  This is only a public method for
     use by things like appcommands which do additional command like parsing.
     """
     self.__dict__['__flags_parsed'] = True
@@ -1001,7 +1002,7 @@ class FlagValues:
 
   def _is_flag_file_directive(self, flag_string):
     """Checks whether flag_string contain a --flagfile=<foo> directive."""
-    if isinstance(flag_string, type('')):
+    if isinstance(flag_string, str):
       if flag_string.startswith('--flagfile='):
         return 1
       elif flag_string == '--flagfile':
@@ -1133,14 +1134,15 @@ class FlagValues:
     using absl.flags DEFINE_flag() type functions.
 
     Notes (assuming we're getting a commandline of some sort as our input):
-    --> For duplicate flags, the last one we hit should "win".
-    --> Since flags that appear later win, a flagfile's settings can be "weak"
+
+    * For duplicate flags, the last one we hit should "win".
+    * Since flags that appear later win, a flagfile's settings can be "weak"
         if the --flagfile comes at the beginning of the argument sequence,
         and it can be "strong" if the --flagfile comes at the end.
-    --> A further "--flagfile=<otherfile.cfg>" CAN be nested in a flagfile.
+    * A further "--flagfile=<otherfile.cfg>" CAN be nested in a flagfile.
         It will be expanded in exactly the spot where it is found.
-    --> In a flagfile, a line beginning with # or // is a comment.
-    --> Entirely blank lines _should_ be ignored.
+    * In a flagfile, a line beginning with # or // is a comment.
+    * Entirely blank lines _should_ be ignored.
     """
     rest_of_args = argv
     new_argv = []
@@ -1296,29 +1298,25 @@ FLAGS = FlagValues()
 class FlagHolder(Generic[_T]):
   """Holds a defined flag.
 
-  This facilitates a cleaner api around global state. Instead of
+  This facilitates a cleaner api around global state. Instead of::
 
-  ```
-  flags.DEFINE_integer('foo', ...)
-  flags.DEFINE_integer('bar', ...)
-  ...
-  def method():
-    # prints parsed value of 'bar' flag
-    print(flags.FLAGS.foo)
-    # runtime error due to typo or possibly bad coding style.
-    print(flags.FLAGS.baz)
-  ```
+      flags.DEFINE_integer('foo', ...)
+      flags.DEFINE_integer('bar', ...)
 
-  it encourages code like
+      def method():
+        # prints parsed value of 'bar' flag
+        print(flags.FLAGS.foo)
+        # runtime error due to typo or possibly bad coding style.
+        print(flags.FLAGS.baz)
 
-  ```
-  FOO_FLAG = flags.DEFINE_integer('foo', ...)
-  BAR_FLAG = flags.DEFINE_integer('bar', ...)
-  ...
-  def method():
-    print(FOO_FLAG.value)
-    print(BAR_FLAG.value)
-  ```
+  it encourages code like::
+
+      _FOO_FLAG = flags.DEFINE_integer('foo', ...)
+      _BAR_FLAG = flags.DEFINE_integer('bar', ...)
+
+      def method():
+        print(_FOO_FLAG.value)
+        print(_BAR_FLAG.value)
 
   since the name of the flag appears only once in the source code.
   """
@@ -1364,7 +1362,8 @@ class FlagHolder(Generic[_T]):
   def value(self):
     """Returns the value of the flag.
 
-    If _ensure_non_none_value is True, then return value is not None.
+    If ``_ensure_non_none_value`` is ``True``, then return value is not
+    ``None``.
 
     Raises:
       UnparsedFlagAccessError: if flag parsing has not finished.
@@ -1385,3 +1384,35 @@ class FlagHolder(Generic[_T]):
   def present(self):
     """Returns True if the flag was parsed from command-line flags."""
     return bool(self._flagvalues[self._name].present)
+
+
+def resolve_flag_ref(flag_ref, flag_values):
+  """Helper to validate and resolve a flag reference argument."""
+  if isinstance(flag_ref, FlagHolder):
+    new_flag_values = flag_ref._flagvalues  # pylint: disable=protected-access
+    if flag_values != FLAGS and flag_values != new_flag_values:
+      raise ValueError(
+          'flag_values must not be customized when operating on a FlagHolder')
+    return flag_ref.name, new_flag_values
+  return flag_ref, flag_values
+
+
+def resolve_flag_refs(flag_refs, flag_values):
+  """Helper to validate and resolve flag reference list arguments."""
+  fv = None
+  names = []
+  for ref in flag_refs:
+    if isinstance(ref, FlagHolder):
+      newfv = ref._flagvalues  # pylint: disable=protected-access
+      name = ref.name
+    else:
+      newfv = flag_values
+      name = ref
+    if fv and fv != newfv:
+      raise ValueError(
+          'multiple FlagValues instances used in invocation. '
+          'FlagHolders must be registered to the same FlagValues instance as '
+          'do flag names, if provided.')
+    fv = newfv
+    names.append(name)
+  return names, fv
