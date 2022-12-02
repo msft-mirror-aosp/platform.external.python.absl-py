@@ -103,10 +103,11 @@ __unittest = True  # pylint: disable=invalid-name
 def expectedFailureIf(condition, reason):  # pylint: disable=invalid-name
   """Expects the test to fail if the run condition is True.
 
-  Example usage:
-    @expectedFailureIf(sys.version.major == 2, "Not yet working in py2")
-    def test_foo(self):
-      ...
+  Example usage::
+
+      @expectedFailureIf(sys.version.major == 2, "Not yet working in py2")
+      def test_foo(self):
+        ...
 
   Args:
     condition: bool, whether to expect failure or not.
@@ -531,8 +532,9 @@ class _TempFile(object):
   # Literal to express more precise return types. The contained type is
   # currently `Any` to avoid [bad-return-type] errors in the open_* methods.
   @contextlib.contextmanager
-  def _open(self, mode, encoding='utf8', errors='strict'):
-    # type: (Text, Text, Text) -> Iterator[Any]
+  def _open(
+      self, mode: str, encoding: str = 'utf8', errors: str = 'strict'
+  ) -> Iterator[Any]:
     with io.open(
         self.full_path, mode=mode, encoding=encoding, errors=errors) as fp:
       yield fp
@@ -622,7 +624,7 @@ class TestCase(unittest.TestCase):
     This creates a named directory on disk that is isolated to this test, and
     will be properly cleaned up by the test. This avoids several pitfalls of
     creating temporary directories for test purposes, as well as makes it easier
-    to setup directories and verify their contents. For example:
+    to setup directories and verify their contents. For example::
 
         def test_foo(self):
           out_dir = self.create_tempdir()
@@ -636,14 +638,14 @@ class TestCase(unittest.TestCase):
           self.assertTrue(os.path.exists(expected_paths[1]))
           self.assertEqual('foo', out_log.read_text())
 
-    See also: `create_tempfile()` for creating temporary files.
+    See also: :meth:`create_tempdir` for creating temporary files.
 
     Args:
       name: Optional name of the directory. If not given, a unique
         name will be generated and used.
       cleanup: Optional cleanup policy on when/if to remove the directory (and
         all its contents) at the end of the test. If None, then uses
-        `self.tempfile_cleanup`.
+        :attr:`tempfile_cleanup`.
 
     Returns:
       A _TempDir representing the created directory; see _TempDir class docs
@@ -677,7 +679,7 @@ class TestCase(unittest.TestCase):
     be properly cleaned up by the test. This avoids several pitfalls of
     creating temporary files for test purposes, as well as makes it easier
     to setup files, their data, read them back, and inspect them when
-    a test fails. For example:
+    a test fails. For example::
 
         def test_foo(self):
           output = self.create_tempfile()
@@ -689,15 +691,15 @@ class TestCase(unittest.TestCase):
     state.
     NOTE: If the file already exists, it will be made writable and overwritten.
 
-    See also: `create_tempdir()` for creating temporary directories, and
-    `_TempDir.create_file` for creating files within a temporary directory.
+    See also: :meth:`create_tempdir` for creating temporary directories, and
+    ``_TempDir.create_file`` for creating files within a temporary directory.
 
     Args:
       file_path: Optional file path for the temp file. If not given, a unique
         file name will be generated and used. Slashes are allowed in the name;
         any missing intermediate directories will be created. NOTE: This path is
         the path that will be cleaned up, including any directories in the path,
-        e.g., 'foo/bar/baz.txt' will `rm -r foo`.
+        e.g., ``'foo/bar/baz.txt'`` will ``rm -r foo``.
       content: Optional string or
         bytes to initially write to the file. If not
         specified, then an empty file is created.
@@ -709,7 +711,7 @@ class TestCase(unittest.TestCase):
         `content` is text.
       cleanup: Optional cleanup policy on when/if to remove the directory (and
         all its contents) at the end of the test. If None, then uses
-        `self.tempfile_cleanup`.
+        :attr:`tempfile_cleanup`.
 
     Returns:
       A _TempFile representing the created file; see _TempFile class docs for
@@ -733,7 +735,7 @@ class TestCase(unittest.TestCase):
     (e.g. `TestCase.enter_context`), the context is exited after the test
     class's tearDownClass call.
 
-    Contexts are are exited in the reverse order of entering. They will always
+    Contexts are exited in the reverse order of entering. They will always
     be exited, regardless of test failure/success.
 
     This is useful to eliminate per-test boilerplate when context managers
@@ -786,24 +788,49 @@ class TestCase(unittest.TestCase):
     elif cleanup == TempFileCleanup.ALWAYS:
       self.addCleanup(_rmtree_ignore_errors, path)
     elif cleanup == TempFileCleanup.SUCCESS:
-      self._internal_cleanup_on_success(_rmtree_ignore_errors, path)
+      self._internal_add_cleanup_on_success(_rmtree_ignore_errors, path)
     else:
       raise AssertionError('Unexpected cleanup value: {}'.format(cleanup))
 
-  def _internal_cleanup_on_success(self, function, *args, **kwargs):
-    # type: (Callable[..., object], Any, Any) -> None
+  def _internal_add_cleanup_on_success(
+      self,
+      function: Callable[..., Any],
+      *args: Any,
+      **kwargs: Any,
+  ) -> None:
+    """Adds `function` as cleanup when the test case succeeds."""
+    outcome = self._outcome
+    previous_failure_count = (
+        len(outcome.result.failures)
+        + len(outcome.result.errors)
+        + len(outcome.result.unexpectedSuccesses)
+    )
     def _call_cleaner_on_success(*args, **kwargs):
-      if not self._ran_and_passed():
+      if not self._internal_ran_and_passed_when_called_during_cleanup(
+          previous_failure_count):
         return
       function(*args, **kwargs)
     self.addCleanup(_call_cleaner_on_success, *args, **kwargs)
 
-  def _ran_and_passed(self):
-    # type: () -> bool
+  def _internal_ran_and_passed_when_called_during_cleanup(
+      self,
+      previous_failure_count: int,
+  ) -> bool:
+    """Returns whether test is passed. Expected to be called during cleanup."""
     outcome = self._outcome
-    result = self.defaultTestResult()
-    self._feedErrorsToResult(result, outcome.errors)  # pytype: disable=attribute-error
-    return result.wasSuccessful()
+    if sys.version_info[:2] >= (3, 11):
+      current_failure_count = (
+          len(outcome.result.failures)
+          + len(outcome.result.errors)
+          + len(outcome.result.unexpectedSuccesses)
+      )
+      return current_failure_count == previous_failure_count
+    else:
+      # Before Python 3.11 https://github.com/python/cpython/pull/28180, errors
+      # were bufferred in _Outcome before calling cleanup.
+      result = self.defaultTestResult()
+      self._feedErrorsToResult(result, outcome.errors)  # pytype: disable=attribute-error
+      return result.wasSuccessful()
 
   def shortDescription(self):
     # type: () -> Text
@@ -1049,10 +1076,10 @@ class TestCase(unittest.TestCase):
     """Asserts that two sequences have the same elements (in any order).
 
     This method, unlike assertCountEqual, doesn't care about any
-    duplicates in the expected and actual sequences.
+    duplicates in the expected and actual sequences::
 
-      >> assertSameElements([1, 1, 1, 0, 0, 0], [0, 1])
-      # Doesn't raise an AssertionError
+        # Doesn't raise an AssertionError
+        assertSameElements([1, 1, 1, 0, 0, 0], [0, 1])
 
     If possible, you should use assertCountEqual instead of
     assertSameElements.
@@ -1148,6 +1175,7 @@ class TestCase(unittest.TestCase):
     expression (a string or re compiled object) instead of a list.
 
     Notes:
+
     1. This function uses substring matching, i.e. the matching
        succeeds if *any* substring of the error message matches *any*
        regex in the list.  This is more convenient for the user than
@@ -1308,6 +1336,8 @@ class TestCase(unittest.TestCase):
       if not issubclass(exc_type, self.expected_exception):
         return False
       self.test_func(exc_value)
+      if exc_value:
+        self.exception = exc_value.with_traceback(None)
       return True
 
   @typing.overload
@@ -1497,39 +1527,39 @@ class TestCase(unittest.TestCase):
     """Asserts that total ordering has been implemented correctly.
 
     For example, say you have a class A that compares only on its attribute x.
-    Comparators other than __lt__ are omitted for brevity.
+    Comparators other than ``__lt__`` are omitted for brevity::
 
-    class A(object):
-      def __init__(self, x, y):
-        self.x = x
-        self.y = y
+        class A(object):
+          def __init__(self, x, y):
+            self.x = x
+            self.y = y
 
-      def __hash__(self):
-        return hash(self.x)
+          def __hash__(self):
+            return hash(self.x)
 
-      def __lt__(self, other):
-        try:
-          return self.x < other.x
-        except AttributeError:
-          return NotImplemented
+          def __lt__(self, other):
+            try:
+              return self.x < other.x
+            except AttributeError:
+              return NotImplemented
 
     assertTotallyOrdered will check that instances can be ordered correctly.
-    For example,
+    For example::
 
-    self.assertTotallyOrdered(
-      [None],  # None should come before everything else.
-      [1],     # Integers sort earlier.
-      [A(1, 'a')],
-      [A(2, 'b')],  # 2 is after 1.
-      [A(3, 'c'), A(3, 'd')],  # The second argument is irrelevant.
-      [A(4, 'z')],
-      ['foo'])  # Strings sort last.
+        self.assertTotallyOrdered(
+            [None],  # None should come before everything else.
+            [1],  # Integers sort earlier.
+            [A(1, 'a')],
+            [A(2, 'b')],  # 2 is after 1.
+            [A(3, 'c'), A(3, 'd')],  # The second argument is irrelevant.
+            [A(4, 'z')],
+            ['foo'])  # Strings sort last.
 
     Args:
-     *groups: A list of groups of elements.  Each group of elements is a list
-         of objects that are equal.  The elements in each group must be less
-         than the elements in the group after it.  For example, these groups are
-         totally ordered: [None], [1], [2, 2], [3].
+      *groups: A list of groups of elements.  Each group of elements is a list
+        of objects that are equal.  The elements in each group must be less
+        than the elements in the group after it.  For example, these groups are
+        totally ordered: ``[None]``, ``[1]``, ``[2, 2]``, ``[3]``.
       **kwargs: optional msg keyword argument can be passed.
     """
 
@@ -2014,12 +2044,14 @@ def main(*args, **kwargs):
 
   Usually this function is called without arguments, so the
   unittest.TestProgram instance will get created with the default settings,
-  so it will run all test methods of all TestCase classes in the __main__
+  so it will run all test methods of all TestCase classes in the ``__main__``
   module.
 
   Args:
-    *args: Positional arguments passed through to unittest.TestProgram.__init__.
-    **kwargs: Keyword arguments passed through to unittest.TestProgram.__init__.
+    *args: Positional arguments passed through to
+        ``unittest.TestProgram.__init__``.
+    **kwargs: Keyword arguments passed through to
+        ``unittest.TestProgram.__init__``.
   """
   print_python_version()
   _run_in_app(run_tests, args, kwargs)
@@ -2034,19 +2066,6 @@ def _is_in_app_main():
       return True
     f = f.f_back
   return False
-
-
-class _SavedFlag(object):
-  """Helper class for saving and restoring a flag value."""
-
-  def __init__(self, flag):
-    self.flag = flag
-    self.value = flag.value
-    self.present = flag.present
-
-  def restore_flag(self):
-    self.flag.value = self.value
-    self.flag.present = self.present
 
 
 def _register_sigterm_with_faulthandler():
@@ -2105,29 +2124,30 @@ def _run_in_app(function, args, kwargs):
   if _is_in_app_main():
     _register_sigterm_with_faulthandler()
 
-    # Save command-line flags so the side effects of FLAGS(sys.argv) can be
-    # undone.
-    flag_objects = (FLAGS[name] for name in FLAGS)
-    saved_flags = dict((f.name, _SavedFlag(f)) for f in flag_objects)
-
     # Change the default of alsologtostderr from False to True, so the test
     # programs's stderr will contain all the log messages.
     # If --alsologtostderr=false is specified in the command-line, or user
     # has called FLAGS.alsologtostderr = False before, then the value is kept
     # False.
     FLAGS.set_default('alsologtostderr', True)
-    # Remove it from saved flags so it doesn't get restored later.
-    del saved_flags['alsologtostderr']
 
-    # The call FLAGS(sys.argv) parses sys.argv, returns the arguments
-    # without the flags, and -- as a side effect -- modifies flag values in
-    # FLAGS. We don't want the side effect, because we don't want to
-    # override flag changes the program did (e.g. in __main__.main)
-    # after the command-line has been parsed. So we have the for loop below
-    # to change back flags to their old values.
-    argv = FLAGS(sys.argv)
-    for saved_flag in saved_flags.values():
-      saved_flag.restore_flag()
+    # Here we only want to get the `argv` without the flags. To avoid any
+    # side effects of parsing flags, we temporarily stub out the `parse` method
+    stored_parse_methods = {}
+    noop_parse = lambda _: None
+    for name in FLAGS:
+      # Avoid any side effects of parsing flags.
+      stored_parse_methods[name] = FLAGS[name].parse
+    # This must be a separate loop since multiple flag names (short_name=) can
+    # point to the same flag object.
+    for name in FLAGS:
+      FLAGS[name].parse = noop_parse
+    try:
+      argv = FLAGS(sys.argv)
+    finally:
+      for name in FLAGS:
+        FLAGS[name].parse = stored_parse_methods[name]
+      sys.stdout.flush()
 
     function(argv, args, kwargs)
   else:
@@ -2164,29 +2184,29 @@ def skipThisClass(reason):
   implementations between a number of concrete testcase classes.
 
   Example usage, showing how you can share some common test methods between
-  subclasses. In this example, only 'BaseTest' will be marked as skipped, and
-  not RealTest or SecondRealTest:
+  subclasses. In this example, only ``BaseTest`` will be marked as skipped, and
+  not RealTest or SecondRealTest::
 
-    @absltest.skipThisClass("Shared functionality")
-    class BaseTest(absltest.TestCase):
-      def test_simple_functionality(self):
-        self.assertEqual(self.system_under_test.method(), 1)
+      @absltest.skipThisClass("Shared functionality")
+      class BaseTest(absltest.TestCase):
+        def test_simple_functionality(self):
+          self.assertEqual(self.system_under_test.method(), 1)
 
-    class RealTest(BaseTest):
-      def setUp(self):
-        super().setUp()
-        self.system_under_test = MakeSystem(argument)
+      class RealTest(BaseTest):
+        def setUp(self):
+          super().setUp()
+          self.system_under_test = MakeSystem(argument)
 
-      def test_specific_behavior(self):
-        ...
+        def test_specific_behavior(self):
+          ...
 
-    class SecondRealTest(BaseTest):
-      def setUp(self):
-        super().setUp()
-        self.system_under_test = MakeSystem(other_arguments)
+      class SecondRealTest(BaseTest):
+        def setUp(self):
+          super().setUp()
+          self.system_under_test = MakeSystem(other_arguments)
 
-      def test_other_behavior(self):
-        ...
+        def test_other_behavior(self):
+          ...
 
   Args:
     reason: The reason we have a skip in place. For instance: 'shared test
@@ -2526,11 +2546,14 @@ def run_tests(argv, args, kwargs):  # pylint: disable=line-too-long
 
   Args:
     argv: sys.argv with the command-line flags removed from the front, i.e. the
-      argv with which app.run() has called __main__.main. It is passed to
-      unittest.TestProgram.__init__(argv=), which does its own flag parsing. It
-      is ignored if kwargs contains an argv entry.
-    args: Positional arguments passed through to unittest.TestProgram.__init__.
-    kwargs: Keyword arguments passed through to unittest.TestProgram.__init__.
+      argv with which :func:`app.run()<absl.app.run>` has called
+      ``__main__.main``. It is passed to
+      ``unittest.TestProgram.__init__(argv=)``, which does its own flag parsing.
+      It is ignored if kwargs contains an argv entry.
+    args: Positional arguments passed through to
+      ``unittest.TestProgram.__init__``.
+    kwargs: Keyword arguments passed through to
+      ``unittest.TestProgram.__init__``.
   """
   result = _run_and_get_tests_result(
       argv, args, kwargs, xml_reporter.TextAndXMLTestRunner)
