@@ -13,11 +13,11 @@ third_party {
     type: GIT
     value: "https://github.com/abseil/abseil-py.git"
   }
-  version: "v1.3.0"
+  version: "v1.4.0"
   license_type: NOTICE
   last_upgrade_date {
-    year: 2024
-    month: 11
-    day: 8
+    year: 2023
+    month: 12
+    day: 7
   }
 }
