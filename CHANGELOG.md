@@ -8,6 +8,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com).
 
 Nothing notable unreleased.
 
+## 1.4.0 (2023-01-11)
+
+### New
+
+*   (testing) Added `@flagsaver.as_parsed`: this allows saving/restoring flags
+    using string values as if parsed from the command line and will also reflect
+    other flag states after command line parsing, e.g. `.present` is set.
+
+### Changed
+
+*   (logging) If no log dir is specified `logging.find_log_dir()` now falls back
+    to `tempfile.gettempdir()` instead of `/tmp/`.
+
+### Fixed
+
+*   (flags) Additional kwargs (e.g. `short_name=`) to `DEFINE_multi_enum_class`
+    are now correctly passed to the underlying `Flag` object.
+
 ## 1.3.0 (2022-10-11)
 
 ### Added
