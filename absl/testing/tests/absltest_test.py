@@ -16,6 +16,7 @@
 
 import collections
 import contextlib
+import dataclasses
 import io
 import os
 import pathlib
@@ -23,7 +24,10 @@ import re
 import stat
 import string
 import subprocess
+import sys
 import tempfile
+import textwrap
+from typing import Optional
 import unittest
 
 from absl.testing import _bazelize_command
@@ -32,13 +36,20 @@ from absl.testing import parameterized
 from absl.testing.tests import absltest_env
 
 
-class HelperMixin(object):
+class BaseTestCase(absltest.TestCase):
 
-  def _get_helper_exec_path(self):
-    helper = 'absl/testing/tests/absltest_test_helper'
+  def _get_helper_exec_path(self, helper_name):
+    helper = 'absl/testing/tests/' + helper_name
     return _bazelize_command.get_executable_path(helper)
 
-  def run_helper(self, test_id, args, env_overrides, expect_success):
+  def run_helper(
+      self,
+      test_id,
+      args,
+      env_overrides,
+      expect_success,
+      helper_name=None,
+  ):
     env = absltest_env.inherited_env()
     for key, value in env_overrides.items():
       if value is None:
@@ -47,31 +58,48 @@ class HelperMixin(object):
       else:
         env[key] = value
 
-    command = [self._get_helper_exec_path(),
-               '--test_id={}'.format(test_id)] + args
+    if helper_name is None:
+      helper_name = 'absltest_test_helper'
+    command = [self._get_helper_exec_path(helper_name)]
+    if test_id is not None:
+      command.append('--test_id={}'.format(test_id))
+    command.extend(args)
     process = subprocess.Popen(
         command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
         universal_newlines=True)
     stdout, stderr = process.communicate()
     if expect_success:
       self.assertEqual(
-          0, process.returncode,
-          'Expected success, but failed with '
-          'stdout:\n{}\nstderr:\n{}\n'.format(stdout, stderr))
+          0,
+          process.returncode,
+          'Expected success, but failed with exit code {},'
+          ' stdout:\n{}\nstderr:\n{}\n'.format(
+              process.returncode, stdout, stderr
+          ),
+      )
     else:
-      self.assertEqual(
-          1, process.returncode,
+      self.assertGreater(
+          process.returncode,
+          0,
           'Expected failure, but succeeded with '
-          'stdout:\n{}\nstderr:\n{}\n'.format(stdout, stderr))
-    return stdout, stderr
+          'stdout:\n{}\nstderr:\n{}\n'.format(stdout, stderr),
+      )
+    return stdout, stderr, process.returncode
 
 
-class TestCaseTest(absltest.TestCase, HelperMixin):
+class TestCaseTest(BaseTestCase):
   longMessage = True
 
-  def run_helper(self, test_id, args, env_overrides, expect_success):
-    return super(TestCaseTest, self).run_helper(test_id, args + ['HelperTest'],
-                                                env_overrides, expect_success)
+  def run_helper(
+      self, test_id, args, env_overrides, expect_success, helper_name=None
+  ):
+    return super(TestCaseTest, self).run_helper(
+        test_id,
+        args + ['HelperTest'],
+        env_overrides,
+        expect_success,
+        helper_name,
+    )
 
   def test_flags_no_env_var_no_flags(self):
     self.run_helper(
@@ -187,11 +215,12 @@ class TestCaseTest(absltest.TestCase, HelperMixin):
         expect_success=True)
 
   def test_app_run(self):
-    stdout, _ = self.run_helper(
+    stdout, _, _ = self.run_helper(
         7,
         ['--name=cat', '--name=dog'],
         {'ABSLTEST_TEST_HELPER_USE_APP_RUN': '1'},
-        expect_success=True)
+        expect_success=True,
+    )
     self.assertIn('Names in main() are: cat dog', stdout)
     self.assertIn('Names in test_name_flag() are: cat dog', stdout)
 
@@ -223,7 +252,7 @@ class TestCaseTest(absltest.TestCase, HelperMixin):
     self.assertEqual(1, 2)  # the expected failure
 
   def test_expected_failure_success(self):
-    _, stderr = self.run_helper(5, ['--', '-v'], {}, expect_success=False)
+    _, stderr, _ = self.run_helper(5, ['--', '-v'], {}, expect_success=False)
     self.assertRegex(stderr, r'FAILED \(.*unexpected successes=1\)')
 
   def test_assert_equal(self):
@@ -459,33 +488,6 @@ Missing entries:
     set1 = set([(0, 1), (2, 3)])
     set2 = set([(4, 5)])
     self.assertRaises(AssertionError, self.assertSetEqual, set1, set2)
-
-  def test_assert_dict_contains_subset(self):
-    self.assertDictContainsSubset({}, {})
-
-    self.assertDictContainsSubset({}, {'a': 1})
-
-    self.assertDictContainsSubset({'a': 1}, {'a': 1})
-
-    self.assertDictContainsSubset({'a': 1}, {'a': 1, 'b': 2})
-
-    self.assertDictContainsSubset({'a': 1, 'b': 2}, {'a': 1, 'b': 2})
-
-    self.assertRaises(absltest.TestCase.failureException,
-                      self.assertDictContainsSubset, {'a': 2}, {'a': 1},
-                      '.*Mismatched values:.*')
-
-    self.assertRaises(absltest.TestCase.failureException,
-                      self.assertDictContainsSubset, {'c': 1}, {'a': 1},
-                      '.*Missing:.*')
-
-    self.assertRaises(absltest.TestCase.failureException,
-                      self.assertDictContainsSubset, {'a': 1, 'c': 1}, {'a': 1},
-                      '.*Missing:.*')
-
-    self.assertRaises(absltest.TestCase.failureException,
-                      self.assertDictContainsSubset, {'a': 1, 'c': 1}, {'a': 1},
-                      '.*Missing:.*Mismatched values:.*')
 
   def test_assert_sequence_almost_equal(self):
     actual = (1.1, 1.2, 1.4)
@@ -1177,16 +1179,18 @@ test case
     self.assertRaises(AssertionError, self.assertTotallyOrdered, [1, 2])
 
   def test_short_description_without_docstring(self):
-    self.assertEquals(
+    self.assertEqual(
         self.shortDescription(),
-        'TestCaseTest.test_short_description_without_docstring')
+        'TestCaseTest.test_short_description_without_docstring',
+    )
 
   def test_short_description_with_one_line_docstring(self):
     """Tests shortDescription() for a method with a docstring."""
-    self.assertEquals(
+    self.assertEqual(
         self.shortDescription(),
         'TestCaseTest.test_short_description_with_one_line_docstring\n'
-        'Tests shortDescription() for a method with a docstring.')
+        'Tests shortDescription() for a method with a docstring.',
+    )
 
   def test_short_description_with_multi_line_docstring(self):
     """Tests shortDescription() for a method with a longer docstring.
@@ -1195,10 +1199,11 @@ test case
     returned used in the short description, no matter how long the
     whole thing is.
     """
-    self.assertEquals(
+    self.assertEqual(
         self.shortDescription(),
         'TestCaseTest.test_short_description_with_multi_line_docstring\n'
-        'Tests shortDescription() for a method with a longer docstring.')
+        'Tests shortDescription() for a method with a longer docstring.',
+    )
 
   def test_assert_url_equal_same(self):
     self.assertUrlEqual('http://a', 'http://a')
@@ -1397,6 +1402,26 @@ test case
         self.assertSameStructure, dict_a, default_b)
     self.assertEmpty(default_b)
 
+  def test_same_structure_uses_type_equality_func_for_leaves(self):
+    class CustomLeaf(object):
+      def __init__(self, n):
+        self.n = n
+
+      def __repr__(self):
+        return f'CustomLeaf({self.n})'
+
+    def assert_custom_leaf_equal(a, b, msg):
+      del msg
+      assert a.n % 5 == b.n % 5
+    self.addTypeEqualityFunc(CustomLeaf, assert_custom_leaf_equal)
+
+    self.assertSameStructure(CustomLeaf(4), CustomLeaf(9))
+    self.assertRaisesWithLiteralMatch(
+        AssertionError,
+        r'a is CustomLeaf(4) but b is CustomLeaf(8)',
+        self.assertSameStructure, CustomLeaf(4), CustomLeaf(8),
+    )
+
   def test_assert_json_equal_same(self):
     self.assertJsonEqual('{"success": true}', '{"success": true}')
     self.assertJsonEqual('{"success": true}', '{"success":true}')
@@ -1446,14 +1471,6 @@ test case
 
 
 class GetCommandStderrTestCase(absltest.TestCase):
-
-  def setUp(self):
-    super(GetCommandStderrTestCase, self).setUp()
-    self.original_environ = os.environ.copy()
-
-  def tearDown(self):
-    super(GetCommandStderrTestCase, self).tearDown()
-    os.environ = self.original_environ
 
   def test_return_status(self):
     tmpdir = tempfile.mkdtemp(dir=absltest.TEST_TMPDIR.value)
@@ -1533,7 +1550,7 @@ class EnterContextClassmethodTest(absltest.TestCase):
 class EqualityAssertionTest(absltest.TestCase):
   """This test verifies that absltest.failIfEqual actually tests __ne__.
 
-  If a user class implements __eq__, unittest.failUnlessEqual will call it
+  If a user class implements __eq__, unittest.assertEqual will call it
   via first == second.   However, failIfEqual also calls
   first == second.   This means that while the caller may believe
   their __ne__ method is being tested, it is not.
@@ -1609,22 +1626,14 @@ class EqualityAssertionTest(absltest.TestCase):
     # Compare two distinct objects
     self.assertFalse(i1 is i2)
     self.assertRaises(AssertionError, self.assertEqual, i1, i2)
-    self.assertRaises(AssertionError, self.assertEquals, i1, i2)
-    self.assertRaises(AssertionError, self.failUnlessEqual, i1, i2)
     self.assertRaises(AssertionError, self.assertNotEqual, i1, i2)
-    self.assertRaises(AssertionError, self.assertNotEquals, i1, i2)
-    self.assertRaises(AssertionError, self.failIfEqual, i1, i2)
     # A NeverEqual object should not compare equal to itself either.
     i2 = i1
     self.assertTrue(i1 is i2)
     self.assertFalse(i1 == i2)
     self.assertFalse(i1 != i2)
     self.assertRaises(AssertionError, self.assertEqual, i1, i2)
-    self.assertRaises(AssertionError, self.assertEquals, i1, i2)
-    self.assertRaises(AssertionError, self.failUnlessEqual, i1, i2)
     self.assertRaises(AssertionError, self.assertNotEqual, i1, i2)
-    self.assertRaises(AssertionError, self.assertNotEquals, i1, i2)
-    self.assertRaises(AssertionError, self.failIfEqual, i1, i2)
 
   def test_all_comparisons_succeed(self):
     a = self.AllSame()
@@ -1633,11 +1642,7 @@ class EqualityAssertionTest(absltest.TestCase):
     self.assertTrue(a == b)
     self.assertFalse(a != b)
     self.assertEqual(a, b)
-    self.assertEquals(a, b)
-    self.failUnlessEqual(a, b)
     self.assertRaises(AssertionError, self.assertNotEqual, a, b)
-    self.assertRaises(AssertionError, self.assertNotEquals, a, b)
-    self.assertRaises(AssertionError, self.failIfEqual, a, b)
 
   def _perform_apple_apple_orange_checks(self, same_a, same_b, different):
     """Perform consistency checks with two apples and an orange.
@@ -1654,20 +1659,14 @@ class EqualityAssertionTest(absltest.TestCase):
     self.assertTrue(same_a == same_b)
     self.assertFalse(same_a != same_b)
     self.assertEqual(same_a, same_b)
-    self.assertEquals(same_a, same_b)
-    self.failUnlessEqual(same_a, same_b)
 
     self.assertFalse(same_a == different)
     self.assertTrue(same_a != different)
     self.assertNotEqual(same_a, different)
-    self.assertNotEquals(same_a, different)
-    self.failIfEqual(same_a, different)
 
     self.assertFalse(same_b == different)
     self.assertTrue(same_b != different)
     self.assertNotEqual(same_b, different)
-    self.assertNotEquals(same_b, different)
-    self.failIfEqual(same_b, different)
 
   def test_comparison_with_eq(self):
     same_a = self.EqualityTestsWithEq(42)
@@ -1688,9 +1687,10 @@ class EqualityAssertionTest(absltest.TestCase):
     self._perform_apple_apple_orange_checks(same_a, same_b, different)
 
 
-class AssertSequenceStartsWithTest(absltest.TestCase):
+class AssertSequenceStartsWithTest(parameterized.TestCase):
 
   def setUp(self):
+    super().setUp()
     self.a = [5, 'foo', {'c': 'd'}, None]
 
   def test_empty_sequence_starts_with_empty_prefix(self):
@@ -1732,10 +1732,15 @@ class AssertSequenceStartsWithTest(absltest.TestCase):
     with self.assertRaisesRegex(AssertionError, msg):
       self.assertSequenceStartsWith(['foo', {'c': 'd'}], self.a)
 
-  def test_raise_if_types_ar_not_supported(self):
-    with self.assertRaisesRegex(TypeError, 'unhashable type'):
-      self.assertSequenceStartsWith({'a': 1, 2: 'b'},
-                                    {'a': 1, 2: 'b', 'c': '3'})
+  @parameterized.named_parameters(
+      ('dict', {'a': 1, 2: 'b'}, {'a': 1, 2: 'b', 'c': '3'}),
+      ('set', {1, 2}, {1, 2, 3}),
+  )
+  def test_raise_if_set_or_dict(self, prefix, whole):
+    with self.assertRaisesRegex(
+        AssertionError, 'For whole: Mapping or Set objects are not supported'
+    ):
+      self.assertSequenceStartsWith(prefix, whole)
 
 
 class TestAssertEmpty(absltest.TestCase):
@@ -1940,6 +1945,9 @@ class TestLoaderTest(absltest.TestCase):
     def TestHelperWithDefaults(self, a=5):
       pass
 
+    def TestHelperWithKeywordOnly(self, *, arg):
+      pass
+
   class Invalid(absltest.TestCase):
     """Test case containing a suspicious method."""
 
@@ -1955,7 +1963,7 @@ class TestLoaderTest(absltest.TestCase):
 
   def test_valid(self):
     suite = self.loader.loadTestsFromTestCase(TestLoaderTest.Valid)
-    self.assertEquals(1, suite.countTestCases())
+    self.assertEqual(1, suite.countTestCases())
 
   def testInvalid(self):
     with self.assertRaisesRegex(TypeError, 'TestSuspiciousMethod'):
@@ -1979,7 +1987,7 @@ class InitNotNecessaryForAssertsTest(absltest.TestCase):
       def __init__(self):  # pylint: disable=super-init-not-called
         pass
 
-    Subclass().assertEquals({}, {})
+    Subclass().assertEqual({}, {})
 
   def test_multiple_inheritance(self):
 
@@ -1991,7 +1999,88 @@ class InitNotNecessaryForAssertsTest(absltest.TestCase):
     class Subclass(Foo, absltest.TestCase):
       pass
 
-    Subclass().assertEquals({}, {})
+    Subclass().assertEqual({}, {})
+
+
+@dataclasses.dataclass
+class _ExampleDataclass:
+  comparable: str
+  not_comparable: str = dataclasses.field(compare=False)
+  comparable2: str = 'comparable2'
+
+
+@dataclasses.dataclass
+class _ExampleCustomEqualDataclass:
+  value: str
+
+  def __eq__(self, other):
+    return False
+
+
+class TestAssertDataclassEqual(absltest.TestCase):
+
+  def test_assert_dataclass_equal_checks_a_for_dataclass(self):
+    b = _ExampleDataclass('a', 'b')
+
+    message = 'First argument is not a dataclass instance.'
+    with self.assertRaisesWithLiteralMatch(AssertionError, message):
+      self.assertDataclassEqual('a', b)
+
+  def test_assert_dataclass_equal_checks_b_for_dataclass(self):
+    a = _ExampleDataclass('a', 'b')
+
+    message = 'Second argument is not a dataclass instance.'
+    with self.assertRaisesWithLiteralMatch(AssertionError, message):
+      self.assertDataclassEqual(a, 'b')
+
+  def test_assert_dataclass_equal_different_dataclasses(self):
+    a = _ExampleDataclass('a', 'b')
+    b = _ExampleCustomEqualDataclass('c')
+
+    message = """Found different dataclass types: <class '__main__._ExampleDataclass'> != <class '__main__._ExampleCustomEqualDataclass'>"""
+    with self.assertRaisesWithLiteralMatch(AssertionError, message):
+      self.assertDataclassEqual(a, b)
+
+  def test_assert_dataclass_equal(self):
+    a = _ExampleDataclass(comparable='a', not_comparable='b')
+    b = _ExampleDataclass(comparable='a', not_comparable='c')
+
+    self.assertDataclassEqual(a, a)
+    self.assertDataclassEqual(a, b)
+    self.assertDataclassEqual(b, a)
+
+  def test_assert_dataclass_fails_non_equal_classes_assert_dict_passes(self):
+    a = _ExampleCustomEqualDataclass(value='a')
+    b = _ExampleCustomEqualDataclass(value='a')
+
+    message = textwrap.dedent("""\
+        _ExampleCustomEqualDataclass(value='a') != _ExampleCustomEqualDataclass(value='a')
+        Cannot detect difference by examining the fields of the dataclass.""")
+    with self.assertRaisesWithLiteralMatch(AssertionError, message):
+      self.assertDataclassEqual(a, b)
+
+  def test_assert_dataclass_fails_assert_dict_fails_one_field(self):
+    a = _ExampleDataclass(comparable='a', not_comparable='b')
+    b = _ExampleDataclass(comparable='c', not_comparable='d')
+
+    message = textwrap.dedent("""\
+        _ExampleDataclass(comparable='a', not_comparable='b', comparable2='comparable2') != _ExampleDataclass(comparable='c', not_comparable='d', comparable2='comparable2')
+        Fields that differ:
+        comparable: 'a' != 'c'""")
+    with self.assertRaisesWithLiteralMatch(AssertionError, message):
+      self.assertDataclassEqual(a, b)
+
+  def test_assert_dataclass_fails_assert_dict_fails_multiple_fields(self):
+    a = _ExampleDataclass(comparable='a', not_comparable='b', comparable2='c')
+    b = _ExampleDataclass(comparable='c', not_comparable='d', comparable2='e')
+
+    message = textwrap.dedent("""\
+        _ExampleDataclass(comparable='a', not_comparable='b', comparable2='c') != _ExampleDataclass(comparable='c', not_comparable='d', comparable2='e')
+        Fields that differ:
+        comparable: 'a' != 'c'
+        comparable2: 'c' != 'e'""")
+    with self.assertRaisesWithLiteralMatch(AssertionError, message):
+      self.assertDataclassEqual(a, b)
 
 
 class GetCommandStringTest(parameterized.TestCase):
@@ -2011,7 +2100,7 @@ class GetCommandStringTest(parameterized.TestCase):
     self.assertEqual(expected, absltest.get_command_string(command))
 
 
-class TempFileTest(absltest.TestCase, HelperMixin):
+class TempFileTest(BaseTestCase):
 
   def assert_dir_exists(self, temp_dir):
     path = temp_dir.full_path
@@ -2036,8 +2125,9 @@ class TempFileTest(absltest.TestCase, HelperMixin):
         'ABSLTEST_TEST_HELPER_TEMPFILE_CLEANUP': cleanup,
         'TEST_TMPDIR': tmpdir.full_path,
         }
-    stdout, stderr = self.run_helper(0, ['TempFileHelperTest'], env,
-                                     expect_success=False)
+    stdout, stderr, _ = self.run_helper(
+        0, ['TempFileHelperTest'], env, expect_success=False
+    )
     output = ('\n=== Helper output ===\n'
               '----- stdout -----\n{}\n'
               '----- end stdout -----\n'
@@ -2075,12 +2165,13 @@ class TempFileTest(absltest.TestCase, HelperMixin):
 
   def test_temp_file_path_like(self):
     tempdir = self.create_tempdir('foo')
-    self.assertIsInstance(tempdir, os.PathLike)
-
     tempfile_ = tempdir.create_file('bar')
-    self.assertIsInstance(tempfile_, os.PathLike)
 
     self.assertEqual(tempfile_.read_text(), pathlib.Path(tempfile_).read_text())
+    # assertIsInstance causes the types to be narrowed, so calling create_file
+    # and read_text() must be done before these assertions to avoid type errors.
+    self.assertIsInstance(tempdir, os.PathLike)
+    self.assertIsInstance(tempfile_, os.PathLike)
 
   def test_unnamed(self):
     td = self.create_tempdir()
@@ -2210,9 +2301,13 @@ class SkipClassTest(absltest.TestCase):
   def test_incorrect_decorator_call(self):
     with self.assertRaises(TypeError):
 
+      # Disabling type checking because pytype correctly picks up that
+      # @absltest.skipThisClass is being used incorrectly.
+      # pytype: disable=wrong-arg-types
       @absltest.skipThisClass
       class Test(absltest.TestCase):  # pylint: disable=unused-variable
         pass
+      # pytype: enable=wrong-arg-types
 
   def test_incorrect_decorator_subclass(self):
     with self.assertRaises(TypeError):
@@ -2267,6 +2362,8 @@ class SkipClassTest(absltest.TestCase):
     @absltest.skipThisClass('reason')
     class BaseTest(absltest.TestCase):
 
+      foo: int
+
       @classmethod
       def setUpClass(cls):
         super(BaseTest, cls).setUpClass()
@@ -2291,6 +2388,8 @@ class SkipClassTest(absltest.TestCase):
 
     @absltest.skipThisClass('reason')
     class Test(absltest.TestCase):
+      foo: str
+      bar: Optional[str]
 
       @classmethod
       def setUpClass(cls, foo, bar=None):
@@ -2317,6 +2416,7 @@ class SkipClassTest(absltest.TestCase):
       pass
 
     class RequiredBase(absltest.TestCase):
+      foo: str
 
       @classmethod
       def setUpClass(cls):
@@ -2398,6 +2498,30 @@ class SkipClassTest(absltest.TestCase):
     self.assertEqual(0, res.testsRun)
     self.assertEmpty(res.failures)
     self.assertEmpty(res.errors)
+
+
+class ExitCodeTest(BaseTestCase):
+
+  def test_exits_5_when_no_tests(self):
+    expect_success = sys.version_info < (3, 12)
+    _, _, exit_code = self.run_helper(
+        None,
+        [],
+        {},
+        expect_success=expect_success,
+        helper_name='absltest_test_helper_skipped',
+    )
+    if not expect_success:
+      self.assertEqual(exit_code, 5)
+
+  def test_exits_5_when_all_skipped(self):
+    self.run_helper(
+        None,
+        [],
+        {'ABSLTEST_TEST_HELPER_DEFINE_CLASS': '1'},
+        expect_success=True,
+        helper_name='absltest_test_helper_skipped',
+    )
 
 
 def _listdir_recursive(path):
